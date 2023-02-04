@@ -23,29 +23,29 @@ class StockTradingEnv(gym.Env):
 
     def __init__(
         self,
-        df: pd.DataFrame,
-        stock_dim: int,
-        hmax: int,
-        initial_amount: int,
-        num_stock_shares: list[int],
-        buy_cost_pct: list[float],
-        sell_cost_pct: list[float],
-        reward_scaling: float,
-        state_space: int,
-        action_space: int,
-        tech_indicator_list: list[str],
-        turbulence_threshold=None,
-        risk_indicator_col="turbulence",
-        make_plots: bool = False,
-        print_verbosity=10,
-        day=0,
-        initial=True,
-        previous_state=[],
-        model_name="",
-        mode="",
-        iteration="",
+        df: pd.DataFrame,                   # Processed data
+        stock_dim: int,                     # Number of stock
+        hmax: int,                          # Number of stock maximum for each normal buy or sell
+        initial_amount: int,                # Initial cash balance
+        num_stock_shares: list[int],        # Number of stocks
+        buy_cost_pct: list[float],          # Cost to buy as ratio 
+        sell_cost_pct: list[float],         # Cost to sell
+        reward_scaling: float,              # ?
+        state_space: int,                   # ?
+        action_space: int,                  # ?
+        tech_indicator_list: list[str],     # List of technical indicatior   
+        turbulence_threshold=None,          # Turbulence thresold
+        risk_indicator_col="turbulence",    # Column name for turbulence
+        make_plots: bool = False,           # Plot or not
+        print_verbosity=10,                 # print mode
+        day=0,                              # number of day passed
+        initial=True,                       # ?
+        previous_state=[],                  # previous state 
+        model_name="",                      # name of the model
+        mode="",                            # ?
+        iteration="",                       # ?
     ):
-        self.day = day
+        self.day = day                  
         self.df = df
         self.stock_dim = stock_dim
         self.hmax = hmax
@@ -55,14 +55,14 @@ class StockTradingEnv(gym.Env):
         self.sell_cost_pct = sell_cost_pct
         self.reward_scaling = reward_scaling
         self.state_space = state_space
-        self.action_space = action_space
+        self.action_space = action_space    #type: ignore
         self.tech_indicator_list = tech_indicator_list
         self.action_space = spaces.Box(low=-1, high=1, shape=(self.action_space,))
         self.observation_space = spaces.Box(
             low=-np.inf, high=np.inf, shape=(self.state_space,)
         )
         self.data = self.df.loc[self.day, :]
-        self.terminal = False
+        self.terminal = False           # If it is true, time to end.
         self.make_plots = make_plots
         self.print_verbosity = print_verbosity
         self.turbulence_threshold = turbulence_threshold
@@ -100,20 +100,42 @@ class StockTradingEnv(gym.Env):
         self._seed()
 
     def _sell_stock(self, index, action):
+        '''
+        Sell the stock of respective index.
+        We will check if there is turbulence threshold set.
+        If the turbulence threshold crossed, we will sell out all available stocks.
+        Also, we check if the stock is soldable and the price is correct before selling.
+        After selling, update the remaining stock number and balance
+
+        Params:
+        - index: index of the stock
+        - action: -k for sell k stocks
+
+        Variables explains:
+        - state[0]: balance
+        - state[index+1]: stock price of the index-th stock
+        - state[index + stock_dim +1]: number of available share of index-th stock
+        - state[index+ 2*stock_dim +1] :True if the stock is able to sell, False if not  
+
+        Returns: number of stocks sold
+        '''
         def _do_sell_normal():
+            '''
+            Sell the stock normally
+            '''
             if (
                 self.state[index + 2 * self.stock_dim + 1] != True
-            ):  # check if the stock is able to sell, for simlicity we just add it in techical index
+            ):  # check if the stock is able to sell, for simlicity we just add it in technical index
                 # if self.state[index + 1] > 0: # if we use price<0 to denote a stock is unable to trade in that day, the total asset calculation may be wrong for the price is unreasonable
                 # Sell only if the price is > 0 (no missing data in this particular date)
                 # perform sell action based on the sign of the action
                 if self.state[index + self.stock_dim + 1] > 0:
                     # Sell only if current asset is > 0
                     sell_num_shares = min(
-                        abs(action), self.state[index + self.stock_dim + 1]
+                        abs(action), self.state[index + self.stock_dim + 1] #type: ignore
                     )
                     sell_amount = (
-                        self.state[index + 1]
+                        self.state[index + 1] #Stock price
                         * sell_num_shares
                         * (1 - self.sell_cost_pct[index])
                     )
@@ -169,7 +191,16 @@ class StockTradingEnv(gym.Env):
         return sell_num_shares
 
     def _buy_stock(self, index, action):
+        '''
+        Buy the stock of index-th. Action is the number of stock to buy.
+        In case the turbulence threshold is set and crossed, do not buy.
+        '''
         def _do_buy():
+            '''
+            Sell the stock normally. 
+            Update balance, number of newly avaialble stocks, total cost, number of total trades.
+            Return number of stock bought.
+            '''
             if (
                 self.state[index + 2 * self.stock_dim + 1] != True
             ):  # check if the stock is able to buy
@@ -213,11 +244,34 @@ class StockTradingEnv(gym.Env):
         return buy_num_shares
 
     def _make_plot(self):
+        '''
+        Plot the chart of account value, save it to a file
+        '''
         plt.plot(self.asset_memory, "r")
         plt.savefig(f"results/account_value_trade_{self.episode}.png")
         plt.close()
 
     def step(self, actions):
+        '''
+        The main logic for each timestep. It is an abstraction of Gym need to be implemented.
+
+        Run one timestep of the environment's dynamics. When end of
+        episode is reached, you are responsible for calling `reset()`
+        to reset this environment's state.
+
+        Accepts an action and returns a tuple (observation, reward, done, info).
+
+        Args:
+            action (object): an action provided by the agent
+
+        Returns:
+            observation (object): agent's observation of the current environment
+            reward (float) : amount of reward returned after previous action
+            done (bool): whether the episode has ended, in which case further step() calls will return undefined results
+            info (dict): contains auxiliary diagnostic information (helpful for debugging, and sometimes learning)
+
+        '''
+        # check if it is the last day of the envirnement, do summary, clean-up, print results
         self.terminal = self.day >= len(self.df.index.unique()) - 1
         if self.terminal:
             # print(f"Episode: {self.episode}")
@@ -237,7 +291,8 @@ class StockTradingEnv(gym.Env):
                     )
                 )
                 - self.asset_memory[0]
-            )  # initial_amount is only cash part of our initial asset
+            ) #type: ignore  
+            # initial_amount is only cash part of our initial asset 
             df_total_value.columns = ["account_value"]
             df_total_value["date"] = self.date_memory
             df_total_value["daily_return"] = df_total_value["account_value"].pct_change(
@@ -299,13 +354,13 @@ class StockTradingEnv(gym.Env):
 
             return self.state, self.reward, self.terminal, {}
 
-        else:
+        else:       #If it is not the end, need to execute the action
             actions = actions * self.hmax  # actions initially is scaled between 0 to 1
             actions = actions.astype(
                 int
             )  # convert into integer because we can't by fraction of shares
             if self.turbulence_threshold is not None:
-                if self.turbulence >= self.turbulence_threshold:
+                if self.turbulence >= self.turbulence_threshold: #Sell all if turbulence
                     actions = np.array([-self.hmax] * self.stock_dim)
             begin_total_asset = self.state[0] + sum(
                 np.array(self.state[1 : (self.stock_dim + 1)])
@@ -313,10 +368,12 @@ class StockTradingEnv(gym.Env):
             )
             # print("begin_total_asset:{}".format(begin_total_asset))
 
+            # Sort out stock number to buy or sell
             argsort_actions = np.argsort(actions)
             sell_index = argsort_actions[: np.where(actions < 0)[0].shape[0]]
             buy_index = argsort_actions[::-1][: np.where(actions > 0)[0].shape[0]]
 
+            # Do the buy or sell
             for index in sell_index:
                 # print(f"Num shares before: {self.state[index+self.stock_dim+1]}")
                 # print(f'take sell action before : {actions[index]}')
@@ -328,11 +385,13 @@ class StockTradingEnv(gym.Env):
                 # print('take buy action: {}'.format(actions[index]))
                 actions[index] = self._buy_stock(index, actions[index])
 
+            # Record action in actions_memory
             self.actions_memory.append(actions)
 
-            # state: s -> s+1
-            self.day += 1
-            self.data = self.df.loc[self.day, :]
+            # state: s -> s+1, 
+            self.day += 1                                        # Update day
+            self.data = self.df.loc[self.day, :]      # Update data
+
             if self.turbulence_threshold is not None:
                 if len(self.df.tic.unique()) == 1:
                     self.turbulence = self.data[self.risk_indicator_col]
@@ -395,6 +454,10 @@ class StockTradingEnv(gym.Env):
         return self.state
 
     def _initiate_state(self):
+        ''' 
+        Initialize the state as initial if set 
+        or as previous_state if not initial
+        '''
         if self.initial:
             # For Initial State
             if len(self.df.tic.unique()) > 1:
@@ -450,10 +513,13 @@ class StockTradingEnv(gym.Env):
         return state
 
     def _update_state(self):
+        '''
+        Update the state after each timestep
+        '''
         if len(self.df.tic.unique()) > 1:
             # for multiple stock
             state = (
-                [self.state[0]]
+                [self.state[0]]         #state[0], aka balance, is already updated when buy or sell
                 + self.data.close.values.tolist()
                 + list(self.state[(self.stock_dim + 1) : (self.stock_dim * 2 + 1)])
                 + sum(
